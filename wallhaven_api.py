@@ -50,7 +50,7 @@ class WallhavenSearchEntry:
         self.url = ""
         self.short_url = ""
         self.views = 0
-        self.favourites = 0
+        self.favorites = 0
         self.source = ""
         self.purity = ""
         self.dimension_x = 0
@@ -59,7 +59,7 @@ class WallhavenSearchEntry:
         self.ratio = ""
         self.file_size = 0
         self.file_type = ""
-        self.created_at = datetime.date()
+        self.created_at = None 
         self.colors = []
         self.path = ""
         self.thumb_large = ""
@@ -71,7 +71,7 @@ class WallhavenSearchEntry:
         self.url = obj["url"]
         self.short_url = obj["short_url"]
         self.views = obj["views"]
-        self.favourites = obj["favourites"]
+        self.favorites = obj["favorites"]
         self.source = obj["source"]
         self.purity = obj["purity"]
         self.dimension_x = obj["dimension_x"]
@@ -102,13 +102,15 @@ class WallhavenSearchResult:
             entry = WallhavenSearchEntry()
             entry.parse_from_json(data)
             self.entries.append(entry)
+        
+        meta = obj["meta"]
 
-        self.current_page = obj["current_page"]
-        self.last_page = obj["last_page"]
-        self.per_page = obj["per_page"]
-        self.total = obj["total"]
-        self.query = obj["query"]
-        self.seed = obj["seed"]
+        self.current_page = meta["current_page"]
+        self.last_page = meta["last_page"]
+        self.per_page = meta["per_page"]
+        self.total = meta["total"]
+        self.query = meta["query"]
+        self.seed = meta["seed"]
 
 TOP_RANGE = [
     "1d",
@@ -210,13 +212,13 @@ class WallhavenAPI:
                categories = WallhavenCategories(), 
                purity = WallhavenPurity(), 
                sorting = WallhavenSorting.DATE_ADDED, 
-               order = WallhavenSorting.DESCENDING, 
+               order = WallhavenOrder.DESCENDING, 
                toplist_range = "1M", 
                atleast = "1920x1080", 
                resolutions = [], 
                ratios = [], 
                colors = [], 
-               page = "1"
+               page = 1
                ):
         params = {
             "q": query,
@@ -224,8 +226,29 @@ class WallhavenAPI:
             "purity": str(purity),
             "sorting": sorting.value,
             "order": order.value,
-            "toplist_range": toplist_range
+            "toplist_range": toplist_range,
+            "atleast": atleast
         }
         
         if self.use_api_key:
             params["apikey"] = self.api_key
+
+        if resolutions:
+            params["resolutions"] = resolutions
+
+        if ratios:
+            params["ratios"] = ratios
+
+        if colors:
+            params["colors"] = colors
+
+        params["page"] = page
+
+        request = requests.get(SEARCH_ENDPOINT, params=params)
+        
+        if request.status_code != 200:
+            return None
+        
+        result = WallhavenSearchResult()
+        result.parse_from_json(request.json())
+        return result
