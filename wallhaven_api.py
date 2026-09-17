@@ -3,6 +3,8 @@ from datetime import datetime
 from enum import Enum
 import random
 import string
+from urllib.parse import urlparse
+from pathlib import Path
 
 BASE_URL = "https://wallhaven.cc/api/v1/"
 SEARCH_ENDPOINT = BASE_URL + "search/"
@@ -44,7 +46,26 @@ class WallhavenOrder(Enum):
     DESCENDING = "desc"
     ASCENDING = "asc"
 
-class WallhavenSearchEntry:
+class WallhavenTag:
+    def __init__(self):
+        self.id = 0
+        self.name = ""
+        self.alias = ""
+        self.category_id = ""
+        self.category = ""
+        self.purity = ""
+        self.created_at = None
+
+    def parse_from_json(self, obj):
+        self.id = obj["id"]
+        self.name = obj["name"]
+        self.alias = obj["alias"]
+        self.category_id = obj["category_id"]
+        self.category = obj["category"]
+        self.purity = obj["purity"]
+        self.created_at = datetime.strptime(obj["created_at"], "%Y-%m-%d %H:%M:%S")
+
+class WallhavenEntry:
     def __init__(self):
         self.id = ""
         self.url = ""
@@ -87,6 +108,58 @@ class WallhavenSearchEntry:
         self.thumb_original = obj["thumbs"]["original"]
         self.thumb_small = obj["thumbs"]["small"]
 
+    def download_to_folder(self, path: Path):
+        req = requests.get(self.path)
+        
+        name = Path(urlparse(self.path).path).name
+
+        with open(str(path / Path(name)), "wb") as f:
+            f.write(req.content)
+
+    def download_thumb_small(self, path: Path):
+        req = requests.get(self.thumb_small)
+
+        name = Path(urlparse(self.path).path).name
+
+        with open(str(path / Path(name)), "wb") as f:
+            f.write(req.content)
+
+        return path / Path(name)
+
+class WallhavenUploader:
+    def __init__(self):
+        self.username = ""
+        self.group = ""
+        self.avatar200px = ""
+        self.avatar128px = ""
+        self.avatar32px = ""
+        self.avatar20px = ""
+
+    def parse_from_json(self, obj):
+        self.username = obj["username"]
+        self.group = obj["group"]
+        avatar = obj["avatar"]
+        self.avatar200px = avatar["200px"]
+        self.avatar128px = avatar["128px"]
+        self.avatar32px = avatar["32px"]
+        self.avatar20px = avatar["20px"]
+
+class WallhavenWallpaperInfo(WallhavenEntry):
+    def __init__(self):
+        super().__init__()
+
+        self.uploader = WallhavenUploader()
+        self.tags = []
+    
+    def parse_from_json(self, obj):
+        super().parse_from_json(obj)
+
+        self.uploader.parse_from_json(obj["uploader"])
+        for t in obj["tags"]:
+            tag = WallhavenTag()
+            tag.parse_from_json(t)
+            self.tags.append(tag)
+
 class WallhavenSearchResult:
     def __init__(self):
         self.entries = []
@@ -99,7 +172,7 @@ class WallhavenSearchResult:
 
     def parse_from_json(self, obj):
         for data in obj["data"]:
-            entry = WallhavenSearchEntry()
+            entry = WallhavenEntry()
             entry.parse_from_json(data)
             self.entries.append(entry)
         
@@ -204,6 +277,9 @@ class WallhavenAPI:
         self.api_key = api_key
         self.seed = ""
 
+        self.temp_path = Path("/tmp/wallhaven-downloader/")
+        self.temp_path.mkdir(exist_ok=True)
+
     def gen_new_seed(self):
         self.seed = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
 
@@ -252,3 +328,17 @@ class WallhavenAPI:
         result = WallhavenSearchResult()
         result.parse_from_json(request.json())
         return result
+
+    def get_wallpaper_info(self, id):
+        params = {}
+        if self.use_api_key:
+            params["apikey"] = self.api_key
+
+        request = requests.get(f"{WALLPAPER_ENDPOINT}{id}", params=params)
+
+        if request.status_code != 200:
+            return None
+        
+        info = WallhavenWallpaperInfo()
+        info.parse_from_json(request.json()["data"])
+        return info
