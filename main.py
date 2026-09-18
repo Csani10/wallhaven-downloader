@@ -563,6 +563,8 @@ class MainPage(Adw.NavigationPage):
         # ----------------------------------------------------
         # 2. Setup FlowBox & Container
         # ----------------------------------------------------
+        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+
         self.flowbox = Gtk.FlowBox(
             orientation=Gtk.Orientation.HORIZONTAL,
             row_spacing=12,
@@ -576,8 +578,27 @@ class MainPage(Adw.NavigationPage):
 
         self.flowbox.connect("child-activated", self.wallpaper_selected)
 
-        view = Gtk.ScrolledWindow(child=self.flowbox)
-        adw_toolbar_view.set_content(view)
+        bottom_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, halign=Gtk.Align.CENTER)
+
+        #self.page_minus_button = Gtk.Button(icon_name="list-remove-symbolic", width_request=20, margin_bottom=5, margin_end=5, margin_start=5)
+        #self.page_counter = Gtk.Entry(text="1", width_request=20, margin_bottom=5, margin_end=5, margin_start=5)
+        #self.page_counter.set_width_chars(3)
+        #self.page_counter.set_max_width_chars(5)
+        #self.page_plus_button = Gtk.Button(icon_name="list-add-symbolic", width_request=20, margin_bottom=5, margin_end=5, margin_start=5)
+        adjustment = Gtk.Adjustment(value=0, lower=0, upper=0, step_increment=1)
+        self.page_counter = Gtk.SpinButton(adjustment=adjustment, numeric=True, margin_bottom=10, margin_top=10)
+        self.page_counter.set_halign(Gtk.Align.CENTER)
+        self.page_counter.connect("value-changed", self.on_page_counter_value_changed)
+
+        bottom_box.append(self.page_counter)
+        #bottom_box.append(self.page_minus_button)
+        #bottom_box.append(self.page_counter)
+        #bottom_box.append(self.page_plus_button)
+
+        view = Gtk.ScrolledWindow(child=self.flowbox, vexpand=True)
+        main_box.append(view)
+        main_box.append(bottom_box)
+        adw_toolbar_view.set_content(main_box)
 
     def show_about_dialog(self):
         about = Adw.AboutDialog.new()
@@ -595,13 +616,19 @@ class MainPage(Adw.NavigationPage):
         self.flowbox.remove_all()
 
         # Perform the API search
-        results = self.api.search(query, self.current_filters)
+        self.results = self.api.search(query, self.current_filters)
 
-        if not results or not results.entries:
+        if not self.results or not self.results.entries:
+            adjustment = Gtk.Adjustment(value=0, lower=0, upper=0, step_increment=1)
+            self.page_counter.set_adjustment(adjustment)
             print(f"No results found for query: {query}")
             return
+        
+        adjustment = Gtk.Adjustment(value=self.results.current_page, lower=1, upper=self.results.last_page, step_increment=1)
 
-        for entry in results.entries:
+        self.page_counter.set_adjustment(adjustment)
+
+        for entry in self.results.entries:
             pic = Gtk.Picture.new_for_filename(
                 str(entry.download_thumb_small(self.api.thumbs_path))
             )
@@ -622,6 +649,16 @@ class MainPage(Adw.NavigationPage):
     def on_search_triggered(self, widget):
         """Callback for search button click or pressing Enter in search entry."""
         query = self.search_entry.get_text().strip()
+        if query:
+            self.load_wallpapers(query)
+
+    def on_page_counter_value_changed(self, widget):
+        value = self.page_counter.get_value_as_int()
+        if value == self.results.current_page:
+            return
+
+        query = self.search_entry.get_text().strip()
+        self.current_filters.page = value
         if query:
             self.load_wallpapers(query)
 
