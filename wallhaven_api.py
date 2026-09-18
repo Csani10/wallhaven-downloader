@@ -1,6 +1,7 @@
 import requests
 from datetime import datetime
 from enum import Enum
+import shutil
 import random
 import string
 from urllib.parse import urlparse
@@ -22,6 +23,17 @@ class WallhavenCategories:
         self.anime = anime
         self.people = people
 
+    def as_list(self):
+        return ["General", "Anime", "People"]
+
+    def selected_as_list(self):
+        result = []
+        if self.general: result.append("General")
+        if self.anime: result.append("Anime")
+        if self.people: result.append("People")
+
+        return result
+
     def __str__(self):
         return f"{bool_to_str(self.general)}{bool_to_str(self.anime)}{bool_to_str(self.people)}"
 
@@ -31,20 +43,65 @@ class WallhavenPurity:
         self.sketchy = sketchy
         self.nsfw = nsfw
 
+    def as_list(self):
+        return ["SFW", "Sketchy", "NSFW"]
+
+    def selected_as_list(self):
+        result = []
+        if self.sfw: result.append("SFW")
+        if self.sketchy: result.append("Sketchy")
+        if self.nsfw: result.append("NSFW")
+
+        return result
+
     def __str__(self):
         return f"{bool_to_str(self.sfw)}{bool_to_str(self.sketchy)}{bool_to_str(self.nsfw)}"
 
 class WallhavenSorting(Enum):
-    DATE_ADDED = "date_added"
     RELEVANCE = "relevance"
     RANDOM = "random"
+    DATE_ADDED = "date_added"
     VIEWS = "views"
     FAVOURITES = "favourites"
     TOPLIST = "toplist"
+    HOT = "hot"
+
+    def str_to_idx(self, value):
+        match value:
+            case "relevance":
+                return 0
+            case "random":
+                return 1
+            case "date_added":
+                return 2
+            case "views":
+                return 3
+            case "favourites":
+                return 4
+            case "toplist":
+                return 5
+            case "hot":
+                return 6
+
+        return -1
 
 class WallhavenOrder(Enum):
-    DESCENDING = "desc"
     ASCENDING = "asc"
+    DESCENDING = "desc"
+
+    def str_to_idx(self, value):
+        match value:
+            case "asc":
+                return 0
+            case "desc":
+                return 1
+
+        return -1
+
+class WallhavenResolutionSearchType(Enum):
+    ATLEAST = 0
+    EXACT = 1
+    ALL = 2
 
 class WallhavenTag:
     def __init__(self):
@@ -116,6 +173,8 @@ class WallhavenEntry:
         with open(str(path / Path(name)), "wb") as f:
             f.write(req.content)
 
+        return path / Path(name)
+
     def download_thumb_small(self, path: Path):
         req = requests.get(self.thumb_small)
 
@@ -125,6 +184,16 @@ class WallhavenEntry:
             f.write(req.content)
 
         return path / Path(name)
+
+    def download_thumb_original(self, path: Path):
+            req = requests.get(self.thumb_original)
+    
+            name = Path(urlparse(self.path).path).name
+    
+            with open(str(path / Path(name)), "wb") as f:
+                f.write(req.content)
+    
+            return path / Path(name)
 
 class WallhavenUploader:
     def __init__(self):
@@ -184,6 +253,41 @@ class WallhavenSearchResult:
         self.total = meta["total"]
         self.query = meta["query"]
         self.seed = meta["seed"]
+
+    def download_thumbs_small(self, path: Path):
+        if path.exists():
+            shutil.rmtree(str(path.absolute()))
+
+        path.mkdir()
+
+        for entry in self.entries:
+            entry.download_thumb_small(path)
+
+class WallhavenSearchFilters:
+    def __init__(self,
+        categories = WallhavenCategories(), 
+        purity = WallhavenPurity(), 
+        sorting = WallhavenSorting.DATE_ADDED, 
+        order = WallhavenOrder.DESCENDING, 
+        toplist_range = "1d",
+        resolution_search_type = WallhavenResolutionSearchType.ALL, 
+        atleast = "", 
+        resolutions = [], 
+        ratios = [], 
+        colors = [], 
+        page = 1
+    ):
+        self.categories = categories
+        self.purity = purity
+        self.sorting = sorting
+        self.order = order
+        self.toplist_range = toplist_range
+        self.resolution_search_type = resolution_search_type
+        self.atleast = atleast
+        self.resolutions = resolutions
+        self.ratios = ratios
+        self.colors = colors
+        self.page = page
 
 TOP_RANGE = [
     "1d",
@@ -272,7 +376,7 @@ ASPECT_RATIOS = [
 ]
 
 class WallhavenAPI:
-    def __init__(self, api_key = ""):
+    def __init__(self, api_key = "", download_path = Path.home()):
         self.use_api_key = len(api_key) > 0
         self.api_key = api_key
         self.seed = ""
@@ -280,45 +384,39 @@ class WallhavenAPI:
         self.temp_path = Path("/tmp/wallhaven-downloader/")
         self.temp_path.mkdir(exist_ok=True)
 
+        self.thumbs_path = self.temp_path / Path("thumbs")
+        self.thumbs_path.mkdir(exist_ok=True)
+
+        self.download_path = download_path
+
     def gen_new_seed(self):
         self.seed = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
 
-    def search(self, 
-               query, 
-               categories = WallhavenCategories(), 
-               purity = WallhavenPurity(), 
-               sorting = WallhavenSorting.DATE_ADDED, 
-               order = WallhavenOrder.DESCENDING, 
-               toplist_range = "1M", 
-               atleast = "1920x1080", 
-               resolutions = [], 
-               ratios = [], 
-               colors = [], 
-               page = 1
-               ):
+    def search(self, query, filters = WallhavenSearchFilters()):
         params = {
             "q": query,
-            "categories": str(categories),
-            "purity": str(purity),
-            "sorting": sorting.value,
-            "order": order.value,
-            "toplist_range": toplist_range,
-            "atleast": atleast
+            "categories": str(filters.categories),
+            "purity": str(filters.purity),
+            "sorting": filters.sorting.value,
+            "order": filters.order.value,
+            "toplist_range": filters.toplist_range,
         }
         
         if self.use_api_key:
             params["apikey"] = self.api_key
 
-        if resolutions:
-            params["resolutions"] = resolutions
+        if filters.resolution_search_type == WallhavenResolutionSearchType.ATLEAST:
+            params["atleast"] = filters.atleast
+        elif filters.resolution_search_type == WallhavenResolutionSearchType.EXACT:
+            params["resolutions"] = ",".join(filters.resolutions)
 
-        if ratios:
-            params["ratios"] = ratios
+        if filters.ratios:
+            params["ratios"] = ",".join(filters.ratios)
 
-        if colors:
-            params["colors"] = colors
+        if filters.colors:
+            params["colors"] = ",".join(filters.colors)
 
-        params["page"] = page
+        params["page"] = filters.page
 
         request = requests.get(SEARCH_ENDPOINT, params=params)
         
